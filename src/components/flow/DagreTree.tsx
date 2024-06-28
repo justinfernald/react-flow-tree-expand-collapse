@@ -1,8 +1,7 @@
-import { MouseEvent, useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   addEdge,
   ConnectionLineType,
-  Panel,
   useNodesState,
   useEdgesState,
   Node,
@@ -14,59 +13,93 @@ import ReactFlow, {
   Background,
   getOutgoers,
   getConnectedEdges,
+  getIncomers,
 } from 'reactflow';
 import dagre from 'dagre';
 
 import 'reactflow/dist/style.css';
 import { convertTreeNodeToNodesAndEdges, tree } from '../../data/nodes-edges';
 import { css } from '@emotion/react';
+import { TreeNode, treeNodeHeight, treeNodeWidth } from './TreeNode';
+import { Direction, getLayoutedElements } from './utils/dagre';
+import { makeAutoObservable } from 'mobx';
 
-const dagreGraph = new dagre.graphlib.Graph();
-dagreGraph.setDefaultEdgeLabel(() => ({}));
+export class FlowHandler {
+  nodes: Node[] = [];
+  edges: Edge[] = [];
 
-const nodeWidth = 172;
-const nodeHeight = 36;
+  constructor() {
+    makeAutoObservable(this, {}, { autoBind: true });
+  }
 
-const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
-  const isHorizontal = direction === 'LR';
-  dagreGraph.setGraph({ rankdir: direction });
+  onNodesChange = (nodes: Node[]) => {
+    this.nodes = nodes;
+  }
 
-  nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
-  });
+  onEdgesChange = (edges: Edge[]) => {
+    this.edges = edges;
+  }
 
-  edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
-  });
+  onConnect = (params: Connection) => {
+    this.edges = addEdge(params, this.edges);
+  }
 
-  dagre.layout(dagreGraph);
+  
+}
 
-  nodes.forEach((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    node.targetPosition = isHorizontal ? Position.Left : Position.Top;
-    node.sourcePosition = isHorizontal ? Position.Right : Position.Bottom;
+export enum NodeType {
+  TreeNode = 'treeNode',
+}
 
-    // We are shifting the dagre node position (anchor=center center) to the top left
-    // so it matches the React Flow node anchor point (top left).
-    node.position = {
-      x: nodeWithPosition.x - nodeWidth / 2,
-      y: nodeWithPosition.y - nodeHeight / 2,
-    };
-
-    return node;
-  });
-
-  return { nodes, edges };
-};
-
-const { nodes: initialNodes, edges: initialEdges } = convertTreeNodeToNodesAndEdges(tree);
-
-const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-  initialNodes,
-  initialEdges,
-);
+const nodeTypes = {
+  [NodeType.TreeNode]: TreeNode,
+} as const;
 
 export const LayoutFlow = () => {
+  useEffect(() => {
+    setTimeout(() => {
+      handleUpdate();
+    }, 100);
+  }, []);
+
+  const changeShowingChildren = (nodeId: string, showChildren: boolean) => {
+    console.log('changeShowingChildren', nodeId, showChildren);
+    setNodes((nodes) =>
+      nodes.map((node) => {
+        if (node.id !== nodeId) {
+          return node;
+        }
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            showingChildren: showChildren,
+          },
+        };
+      }),
+    );
+
+    setTimeout(() => {
+      handleUpdate();
+    }, 100);
+  };
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+    () => convertTreeNodeToNodesAndEdges(tree, changeShowingChildren),
+    [],
+  );
+
+  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(
+    () =>
+      getLayoutedElements(
+        initialNodes,
+        initialEdges,
+        Direction.Vertical,
+        treeNodeWidth,
+        treeNodeHeight,
+      ),
+    [initialNodes, initialEdges],
+  );
+
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
 
@@ -77,74 +110,56 @@ export const LayoutFlow = () => {
       ),
     [],
   );
-  const onLayout = useCallback(
-    (direction: string) => {
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        nodes,
-        edges,
-        direction,
-      );
 
-      setNodes([...layoutedNodes]);
-      setEdges([...layoutedEdges]);
-    },
-    [nodes, edges],
+  const hide = useCallback(
+    (hidden: boolean, childEdgeIDs: string[], childNodeIDs: string[]) =>
+      (nodeOrEdge: Node | Edge) => {
+        if (childEdgeIDs.includes(nodeOrEdge.id) || childNodeIDs.includes(nodeOrEdge.id))
+          nodeOrEdge.hidden = hidden;
+        return { ...nodeOrEdge };
+      },
+    [],
   );
 
-  const [hidden, setHidden] = useState(true);
+  const hideChildren = useCallback(
+    (node: Node, nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[] } => {
+      const outgoers = getOutgoers(node, nodes, edges);
+      const childNodeIDs = outgoers.map((node) => node.id);
+      const childEdgeIDs = getConnectedEdges(outgoers, edges).map((edge) => edge.id);
 
-  const hide =
-    (hidden: boolean, childEdgeIDs: string[], childNodeIDs: string[]) =>
-    (nodeOrEdge: Node | Edge) => {
-      if (childEdgeIDs.includes(nodeOrEdge.id) || childNodeIDs.includes(nodeOrEdge.id))
-        nodeOrEdge.hidden = hidden;
-      return nodeOrEdge;
-    };
+      const updatedNodes = nodes.map(hide(true, childEdgeIDs, childNodeIDs)) as Node[];
+      const updatedEdges = edges.map(hide(true, childEdgeIDs, childNodeIDs)) as Edge[];
 
-  const checkTarget = (edge: Edge[], id: string) => {
-    let edges = edge.filter((ed) => {
-      return ed.target !== id;
-    });
-    return edges;
+      return outgoers.reduce(
+        (acc, childEdge) => hideChildren(childEdge, acc.nodes, acc.edges),
+        { nodes: updatedNodes, edges: updatedEdges },
+      );
+    },
+    [],
+  );
+
+  const showChildren = (
+    node: Node,
+    nodes: Node[],
+    edges: Edge[],
+  ): { nodes: Node[]; edges: Edge[] } => {
+    const outgoers = getOutgoers(node, nodes, edges);
+    const childNodeIDs = outgoers.map((node) => node.id);
+    const childEdgeIDs = getConnectedEdges(outgoers, edges).map((edge) => edge.id);
+
+    const updatedNodes = nodes.map(hide(false, childEdgeIDs, childNodeIDs)) as Node[];
+    const updatedEdges = edges.map(hide(false, childEdgeIDs, childNodeIDs)) as Edge[];
+
+    return outgoers.reduce(
+      (acc, childEdge) => showChildren(childEdge, acc.nodes, acc.edges),
+      { nodes: updatedNodes, edges: updatedEdges },
+    );
   };
 
-  let outgoers: Node[] = [];
-  let connectedEdges: Edge[] = [];
-  let stack = [];
-
-  const nodeClick = (e: MouseEvent, node: Node) => {
-    let currentNodeID = node.id;
-    stack.push(node);
-    while (stack.length > 0) {
-      let lastNode = stack.pop();
-
-      if (!lastNode) {
-        break;
-      }
-
-      let childNodes = getOutgoers(lastNode, nodes, edges);
-      let childEdges = checkTarget(getConnectedEdges([lastNode], edges), currentNodeID);
-      childNodes.map((goer, key) => {
-        stack.push(goer);
-        outgoers.push(goer);
-      });
-      childEdges.map((edge, key) => {
-        connectedEdges.push(edge);
-      });
-    }
-
-    let childNodeIDs = outgoers.map((node) => {
-      return node.id;
-    });
-    let childEdgeIDs = connectedEdges.map((edge) => {
-      return edge.id;
-    });
-
-    const hidden = !(getOutgoers(node, nodes, edges)[0].hidden ?? false);
-
-    setNodes((node) => node.map(hide(hidden, childEdgeIDs, childNodeIDs)) as Node[]);
-    setEdges((edges) => edges.map(hide(hidden, childEdgeIDs, childNodeIDs)) as Edge[]);
-    setHidden(!hidden);
+  const handleUpdate = () => {
+    const rootNodes = nodes.filter(
+      (node) => getIncomers(node, nodes, edges).length === 0,
+    );
   };
 
   return (
@@ -156,12 +171,12 @@ export const LayoutFlow = () => {
         hideAttribution: true,
       }}
       nodes={nodes}
+      nodeTypes={nodeTypes}
       edges={edges}
       zoomOnDoubleClick={false}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
-      onNodeClick={nodeClick}
       connectionLineType={ConnectionLineType.SmoothStep}
       fitView
     >

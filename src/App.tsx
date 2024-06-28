@@ -1,12 +1,8 @@
 import './App.css';
+import '@blueprintjs/core/lib/css/blueprint.css';
 
-import { Card } from './components/base';
 import { LayoutFlow } from './components/flow/DagreTree';
-import TodoList from './components/todo/TodoList';
-import TodoListModel from './models/TodoListModel';
-import { absolute, flexCenter, fullSize, padding } from './styles';
-
-const todoListStore = new TodoListModel();
+import { absolute, flexCenter, fullSize } from './styles';
 
 function App() {
   return (

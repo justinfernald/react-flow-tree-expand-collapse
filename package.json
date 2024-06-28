@@ -16,6 +16,7 @@
     "build-storybook": "build-storybook"
   },
   "dependencies": {
+    "@blueprintjs/core": "^5.10.3",
     "@emotion/react": "^11.10.5",
     "dagre": "^0.8.5",
     "mobx": "^6.6.2",
