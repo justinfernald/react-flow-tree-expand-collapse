@@ -1,4 +1,4 @@
-import { Node, Edge, MarkerType } from 'reactflow';
+import { Node, Edge } from 'reactflow';
 import { NodeType } from '../components/flow/DagreTree';
 
 const position = { x: 0, y: 0 };
