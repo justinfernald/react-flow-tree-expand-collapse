@@ -17,7 +17,7 @@
     "@emotion/react": "^11.10.5",
     "dagre": "^0.8.5",
     "mobx": "^6.6.2",
-    "mobx-react-lite": "^3.4.3",
+    "mobx-react-lite": "^4.0.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "reactflow": "^11.11.4"
