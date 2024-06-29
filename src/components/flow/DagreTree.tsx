@@ -1,50 +1,42 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import ReactFlow, {
-  addEdge,
   ConnectionLineType,
-  useNodesState,
-  useEdgesState,
   Node,
   Edge,
-  Position,
-  Connection,
   MiniMap,
   Controls,
   Background,
-  getOutgoers,
-  getConnectedEdges,
-  getIncomers,
 } from 'reactflow';
-import dagre from 'dagre';
 
-import 'reactflow/dist/style.css';
 import { convertTreeNodeToNodesAndEdges, tree } from '../../data/nodes-edges';
 import { css } from '@emotion/react';
 import { TreeNode, treeNodeHeight, treeNodeWidth } from './TreeNode';
-import { Direction, getLayoutedElements } from './utils/dagre';
-import { makeAutoObservable } from 'mobx';
+import { Direction, getLayoutedElements } from '../../utils/dagre';
+import { action, toJS } from 'mobx';
+import { observer } from 'mobx-react-lite';
+import { FlowHandler } from '../../models/FlowHandler';
+import { TreeHandler, TreeHandlerContext } from '../../models/TreeHandler';
 
-export class FlowHandler {
-  nodes: Node[] = [];
-  edges: Edge[] = [];
+function injectDataProperties(
+  nodes: Node[],
+  edges: Edge[],
+  changeShowingChildren: (nodeId: string, showChildren: boolean) => void,
+): { nodes: Node[]; edges: Edge[] } {
+  const updatedNodes = nodes.map((node) => {
+    if (node.type === NodeType.TreeNode) {
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          showingChildren: false,
+          changeShowingChildren,
+        },
+      };
+    }
+    return node;
+  });
 
-  constructor() {
-    makeAutoObservable(this, {}, { autoBind: true });
-  }
-
-  onNodesChange = (nodes: Node[]) => {
-    this.nodes = nodes;
-  }
-
-  onEdgesChange = (edges: Edge[]) => {
-    this.edges = edges;
-  }
-
-  onConnect = (params: Connection) => {
-    this.edges = addEdge(params, this.edges);
-  }
-
-  
+  return { nodes: updatedNodes, edges };
 }
 
 export enum NodeType {
@@ -55,34 +47,18 @@ const nodeTypes = {
   [NodeType.TreeNode]: TreeNode,
 } as const;
 
-export const LayoutFlow = () => {
-  useEffect(() => {
-    setTimeout(() => {
-      handleUpdate();
-    }, 100);
-  }, []);
+export const LayoutFlow = observer(() => {
+  console.log('render');
 
-  const changeShowingChildren = (nodeId: string, showChildren: boolean) => {
+  const changeShowingChildren = action((nodeId: string, showChildren: boolean) => {
     console.log('changeShowingChildren', nodeId, showChildren);
-    setNodes((nodes) =>
-      nodes.map((node) => {
-        if (node.id !== nodeId) {
-          return node;
-        }
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            showingChildren: showChildren,
-          },
-        };
-      }),
-    );
+    const node = flowHandler.nodes.find((node) => node.id === nodeId);
 
-    setTimeout(() => {
-      handleUpdate();
-    }, 100);
-  };
+    if (!node) return;
+
+    node.data.showingChildren = showChildren;
+  });
+
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
     () => convertTreeNodeToNodesAndEdges(tree, changeShowingChildren),
     [],
@@ -100,92 +76,44 @@ export const LayoutFlow = () => {
     [initialNodes, initialEdges],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
-
-  const onConnect = useCallback(
-    (params: Connection) =>
-      setEdges((eds) =>
-        addEdge({ ...params, type: ConnectionLineType.SmoothStep, animated: true }, eds),
-      ),
-    [],
+  const { nodes: hidableNodes, edges: hidableEdges } = useMemo(
+    () => injectDataProperties(layoutedNodes, layoutedEdges, changeShowingChildren),
+    [layoutedNodes, layoutedEdges],
   );
 
-  const hide = useCallback(
-    (hidden: boolean, childEdgeIDs: string[], childNodeIDs: string[]) =>
-      (nodeOrEdge: Node | Edge) => {
-        if (childEdgeIDs.includes(nodeOrEdge.id) || childNodeIDs.includes(nodeOrEdge.id))
-          nodeOrEdge.hidden = hidden;
-        return { ...nodeOrEdge };
-      },
-    [],
+  const flowHandler = useMemo(
+    () => new FlowHandler(hidableNodes, hidableEdges),
+    [layoutedNodes, layoutedEdges],
   );
 
-  const hideChildren = useCallback(
-    (node: Node, nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[] } => {
-      const outgoers = getOutgoers(node, nodes, edges);
-      const childNodeIDs = outgoers.map((node) => node.id);
-      const childEdgeIDs = getConnectedEdges(outgoers, edges).map((edge) => edge.id);
-
-      const updatedNodes = nodes.map(hide(true, childEdgeIDs, childNodeIDs)) as Node[];
-      const updatedEdges = edges.map(hide(true, childEdgeIDs, childNodeIDs)) as Edge[];
-
-      return outgoers.reduce(
-        (acc, childEdge) => hideChildren(childEdge, acc.nodes, acc.edges),
-        { nodes: updatedNodes, edges: updatedEdges },
-      );
-    },
-    [],
-  );
-
-  const showChildren = (
-    node: Node,
-    nodes: Node[],
-    edges: Edge[],
-  ): { nodes: Node[]; edges: Edge[] } => {
-    const outgoers = getOutgoers(node, nodes, edges);
-    const childNodeIDs = outgoers.map((node) => node.id);
-    const childEdgeIDs = getConnectedEdges(outgoers, edges).map((edge) => edge.id);
-
-    const updatedNodes = nodes.map(hide(false, childEdgeIDs, childNodeIDs)) as Node[];
-    const updatedEdges = edges.map(hide(false, childEdgeIDs, childNodeIDs)) as Edge[];
-
-    return outgoers.reduce(
-      (acc, childEdge) => showChildren(childEdge, acc.nodes, acc.edges),
-      { nodes: updatedNodes, edges: updatedEdges },
-    );
-  };
-
-  const handleUpdate = () => {
-    const rootNodes = nodes.filter(
-      (node) => getIncomers(node, nodes, edges).length === 0,
-    );
-  };
+  const treeHandler = useMemo(() => new TreeHandler(flowHandler), [flowHandler]);
 
   return (
-    <ReactFlow
-      css={[reactFlowStyle]}
-      minZoom={0.2}
-      maxZoom={5}
-      proOptions={{
-        hideAttribution: true,
-      }}
-      nodes={nodes}
-      nodeTypes={nodeTypes}
-      edges={edges}
-      zoomOnDoubleClick={false}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
-      connectionLineType={ConnectionLineType.SmoothStep}
-      fitView
-    >
-      <MiniMap zoomable pannable />
-      <Controls showInteractive={false} />
-      <Background />
-    </ReactFlow>
+    <TreeHandlerContext.Provider value={treeHandler}>
+      <ReactFlow
+        css={[reactFlowStyle]}
+        minZoom={0.2}
+        maxZoom={5}
+        proOptions={{
+          hideAttribution: false,
+        }}
+        nodes={toJS(treeHandler.nodes)}
+        nodeTypes={nodeTypes}
+        edges={toJS(treeHandler.edges)}
+        zoomOnDoubleClick={false}
+        onNodesChange={flowHandler.onNodesChange}
+        onEdgesChange={flowHandler.onEdgesChange}
+        onConnect={flowHandler.onConnect}
+        connectionLineType={ConnectionLineType.SmoothStep}
+        fitView
+      >
+        <MiniMap zoomable pannable />
+        <Controls showInteractive={false} />
+        <Background />
+      </ReactFlow>
+    </TreeHandlerContext.Provider>
   );
-};
+});
 
 export const reactFlowStyle = css({
   '& .react-flow__handle': {

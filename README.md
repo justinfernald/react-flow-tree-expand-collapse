@@ -1,11 +1,9 @@
-# React template
+# React Flow Expand and Collapse Reimplementation
 
-### Template for React project using Vite bundler.
+This is a reimplementation of the [Expand and Collapse example](https://reactflow.dev/examples/layout/expand-collapse) from ReactFlow
 
-### Features
+This example is created in a way so that is very simple to customize. It does use MobX for state management and Emotion for styling.
 
-- Includes basic project structure
-- Styling system setup with Emotion
-- State management system with MobX
+Thank you React Flow for creating an awesome library
 
-This defaults with a simple Todo app to see minimal demonstration of project setup.
+Not all the features from the original example are reimplemented like animation and the ability to click and add new nodes just the core concept of toggling the viewing of children.

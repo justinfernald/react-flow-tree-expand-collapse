@@ -1,15 +1,25 @@
-import { Handle, NodeProps, Position } from 'reactflow';
+import { Handle, NodeProps, Position, useNodeId } from 'reactflow';
 import { TreeViewData } from '../../data/nodes-edges';
 import { Button } from '@blueprintjs/core';
 import { FlexColumn } from '../base/Flex';
 import { flex1, fullSize } from '../../styles';
+import { observer } from 'mobx-react-lite';
+import { useTreeHandler } from '../../models/TreeHandler';
 
 export const treeNodeWidth = 172;
-export const treeNodeHeight = 72;
+export const treeNodeHeight = 120;
 
 export interface TreeNodeProps extends NodeProps<TreeViewData> {}
 
-export const TreeNode = (props: TreeNodeProps) => {
+export const TreeNode = observer((props: TreeNodeProps) => {
+  const treeHandler = useTreeHandler();
+
+  const nodeId = useNodeId();
+  const node = treeHandler.getNodeById(nodeId);
+
+  const childCount = node ? treeHandler.getChildrenCount(node) : 0;
+  const descendantsCount = node ? treeHandler.getDescendantsCount(node) : 0;
+
   const { data, isConnectable } = props;
 
   const { showingChildren, setShowingChildren } = data;
@@ -27,7 +37,13 @@ export const TreeNode = (props: TreeNodeProps) => {
     >
       <Handle type="target" position={Position.Top} isConnectable={isConnectable} />
       <FlexColumn css={[fullSize]}>
-        <div css={flex1}>{data.label}</div>
+        <div css={flex1}>
+          <div>{data.label}</div>
+          {data.subLabel && <div>{data.subLabel}</div>}
+
+          <div>Children: {childCount}</div>
+          <div>Descendants: {descendantsCount}</div>
+        </div>
         <Button
           css={{ alignSelf: 'center' }}
           small
@@ -39,4 +55,4 @@ export const TreeNode = (props: TreeNodeProps) => {
       <Handle type="source" position={Position.Bottom} isConnectable={isConnectable} />
     </div>
   );
-};
+});
